@@ -2,6 +2,9 @@
     PZEM_Emon.py
     Script that polls a Modbus connected energy monitor (PZEM-016) and sends the
     data to EmonCMS using HTTP
+
+    The data item names can be modified to whatever you want, I just used names that
+    were already in my system to prevent data loss.
     
     NOTE: This uses the custom ESPLogRecord, which requires time.time() to return the
     actual Unix Epoch time i.e. lots of seconds! This requires use of the ntptime.settime()
@@ -24,6 +27,8 @@ import logging
 from ESPLogRecord import ESPLogRecord
 import SwitchFileHandler
 
+# These url processing functions are required because micropython requests module
+# doesn't do the encoding, unlike the CPython version, to save space (?!)
 def url_escape(s): # Translate payload to URL-encoded
     return ''.join(c if c.isalpha() or c.isdigit() else '%%%02x' % ord(c) for c in s)
 
@@ -40,18 +45,20 @@ lastLogFileName = '/lastLog.log'
 '''
     Edit credentials, URL, EmonCMS node name!!
 '''
-ssid = "norcot"
-pwd = "nor265cot"
-url = 'http://emonpi.local/input/post'
-node = 'ASHP'
-apikey = '0e2988b2400a4ca9cb856015529de7f4'
+ssid = "ssid"   # WiFi SSID
+pwd = "wifipwd" # WiFi password
+url = 'http://emonpi.local/input/post' # Local EmonCMS URL - probably won't be different!
+node = 'yourNode'   # Whatever you want your data grouped under on the Inputs page
+apikey = '0123456789Abcdef0123456789ABCDEF'     # Your APIkey for write
 
 # the following definition is for an ESP32
 rtu_pins = (17, 16)         # (TX, RX)
-
+PzemPollInterval = 10000; # 10 secs
 
 
 # Create log
+# This provides output on the console and also to a file on the ESP32 Flash
+# The main log entity logging level controls the overall logging level - use INFO or DEBUG to see more
 log = logging.getLogger('PZEM')
 log.setLevel(logging.ERROR)
 log.record = ESPLogRecord()
@@ -112,7 +119,7 @@ async def flush_log_task():
                 log.info('Switching log')
                 lastSwitchTime = now
                 file_handler.switchLog(logFileName, lastLogFileName)
-                                
+
         await asyncio.sleep(1)
 
 async def set_time_task():
@@ -128,6 +135,7 @@ async def main():
     asyncio.create_task(flush_log_task())
     asyncio.create_task(set_time_task())
     
+    # If you have copied the lib directory onto the ESP32, this will always be loaded...
     log.info ('Connected ok... installing Modbus')
     modbusLoaded = False
     try:
@@ -136,6 +144,7 @@ async def main():
         modbusLoaded = True
     except Exception as e:
         log.info('modbus not present... loading')
+        # Otherwise this is a handy example of using mip!
         try:
             mip.install('github:brainelectronics/micropython-modbus')
         except Exception as e:
@@ -176,18 +185,19 @@ async def main():
         if not modbusError:
             log.info (f'Status of Input regs: {reg_status}')
             energyData = {}
-            energyData['voltage'] =(reg_status[0] * 0.1)                            # Voltage(0.1V)
-            energyData['current_b'] =((reg_status[1] + (reg_status[2] << 16)) * 0.001)# Current(0.001A)
-            energyData['power_b'] =((reg_status[3] + (reg_status[4] << 16)) * 0.1)  # Power(0.1W)
-            energyData['energy_forward_b'] =((reg_status[5] + (reg_status[6] << 16)) * 0.001)# Energy(1Wh)
-            energyData['frequency'] =(reg_status[7] * 0.1)                            # Frequency
-            energyData['power_factor_b'] =(reg_status[8] * 0.01)                           # Power Factor
+            # The data item names can be changed to whatever you require
+            energyData['voltage'] =(reg_status[0] * 0.1)                              # Voltage(0.1V)
+            energyData['current'] =((reg_status[1] + (reg_status[2] << 16)) * 0.001)  # Current(0.001A)
+            energyData['power'] =((reg_status[3] + (reg_status[4] << 16)) * 0.1)      # Power(0.1W)
+            energyData['energy_forward'] =((reg_status[5] + (reg_status[6] << 16)) * 0.001)# Energy(1Wh)
+            energyData['frequency'] =(reg_status[7] * 0.1)                              # Frequency
+            energyData['power_factor'] =(reg_status[8] * 0.01)                        # Power Factor
             energyJson = json.dumps(energyData)
-            params['fulljson'] = energyJson
+            params['fulljson'] = energyJson # This overwrites the value every loop
             #print(params)
             #print (url_querystring_encode(params))
             try:
-                fullUrl = url+'?'+url_querystring_encode(params)
+                fullUrl = url + '?' + url_querystring_encode(params)
                 response = requests.get(fullUrl)
                 if response.status_code != 200:
                     log.error('Response code: %d text: %s', response.status_code, response.text)
@@ -195,14 +205,15 @@ async def main():
                 log.error('Exception during request: %s', e)
             finally:
                 pass
-            if count >= 60:
+            if count >= 60: # Just making an occasional noise to demonstrate working
                 log.debug('Working... last result %d: %s', response.status_code, response.text)
                 count = 0;
         count = count + 1
+        # Following attempts to stay close to N second data interval 
         # ns is 1000000000, ms is 1000
         diff = math.ceil((time.time_ns()-t1)/1000000) # Make ns into ms
         #print("diff:", diff)
-        await asyncio.sleep_ms(max(10000-diff, 1)) # Don't want a negative...
+        await asyncio.sleep_ms(max(PzemPollInterval-diff, 1)) # Don't want a negative...
 
 if __name__ == '__main__':
     try:
