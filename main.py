@@ -47,7 +47,11 @@ lastLogFileName = '/lastLog.log'
 '''
 ssid = "ssid"   # WiFi SSID
 pwd = "wifipwd" # WiFi password
-url = 'http://emonpi.local/input/post' # Local EmonCMS URL - probably won't be different!
+#url = 'http://emonpi.local/input/post' # Local EmonCMS URL - probably won't be different!
+# My recommendation is to use the server IP address directly - I've had problems
+# with mDNS resolution in the ESP32's use of the lwip library
+# but YMMV
+url = 'http://192.168.68.123/input/post' # Local EmonCMS URL
 node = 'yourNode'   # Whatever you want your data grouped under on the Inputs page
 apikey = '0123456789Abcdef0123456789ABCDEF'     # Your APIkey for write
 
